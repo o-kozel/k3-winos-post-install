@@ -1,0 +1,13 @@
+# Архів курсорів не публікується (чужі курсори, похідні від Apple) - див. assets/cursors/README.md
+assets/cursors/*.zip
+
+# Локальні налаштування інструментів
+.claude/
+.vscode/
+
+# Журнали й тимчасові файли
+*.log
+*.tmp
+~$*
+Thumbs.db
+desktop.ini
