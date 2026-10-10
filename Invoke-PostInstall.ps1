@@ -7,7 +7,8 @@
 .DESCRIPTION
     Запускає задачі з tasks\ у порядку числових префіксів (00-, 10-, ...).
     Падіння однієї задачі не зупиняє решту, але фіксується в підсумковій таблиці.
-    Увесь прогін пишеться у транскрипт у -LogDirectory.
+    Увесь прогін пишеться у транскрипт у -LogDirectory. Наприкінці друкуються ручні кроки
+    з data\manual-steps.psd1 (і зберігаються поруч із журналом як *_manual-steps.txt).
 .EXAMPLE
     .\Invoke-PostInstall.ps1 -WhatIf
 .EXAMPLE
@@ -127,6 +128,19 @@ finally {
     if ($results.Count -gt 0) {
         # Підсумкова таблиця - головний артефакт прогону; Out-Host, щоб потрапила в транскрипт
         $results | Format-Table -Property Task, Status, Seconds, Note -AutoSize -Wrap | Out-Host
+
+        # Ручні кроки - останнім, щоб лишились на екрані; лише для задач, які виконувались.
+        # Збій тут не повинен зіпсувати код виходу чи транскрипт
+        if (Get-Command Show-ManualSteps -ErrorAction Ignore) {
+            try {
+                Show-ManualSteps -Path (Join-Path $PSScriptRoot 'data\manual-steps.psd1') `
+                    -Task @($results | Where-Object { $_.Status -ne 'SKIPPED' } | ForEach-Object { $_.Task }) `
+                    -OutFile ($logFile -replace '\.log$', '_manual-steps.txt')
+            }
+            catch {
+                Write-Host " !! Не вдалося показати ручні кроки: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
     }
     Stop-Transcript | Out-Null
 }

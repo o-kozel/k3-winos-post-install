@@ -13,6 +13,7 @@
         'Set-RegValue'
         'Set-ServiceStartup'
         'Set-TaskStatus'
+        'Show-ManualSteps'
         'Test-Prerequisites'
         'Write-Step'
     )

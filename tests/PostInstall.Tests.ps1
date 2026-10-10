@@ -41,8 +41,10 @@ Describe 'Дані' {
         Assert-None $dups 'дублікати AppX-шаблонів'
     }
 
-    It 'appx-remove.psd1: жоден шаблон не зачіпає пакети, потрібні іграм (Game Pass)' {
-        $protected = 'Microsoft.GamingServices', 'Microsoft.XboxApp', 'Microsoft.Xbox.TCUI', 'Microsoft.XboxGameOverlay', 'Microsoft.XboxGameCallableUI', 'Microsoft.XboxIdentityProvider'
+    It 'appx-remove.psd1: жоден шаблон не зачіпає пакети, потрібні іграм (Game Pass) і системі' {
+        $protected = 'Microsoft.GamingServices', 'Microsoft.GamingApp', 'Microsoft.XboxApp', 'Microsoft.Xbox.TCUI', 'Microsoft.XboxGameOverlay', 'Microsoft.XboxGameCallableUI', 'Microsoft.XboxIdentityProvider',
+            # winget, Store, Ножиці (Win+Shift+S - WCS B2), засоби усунення неполадок
+            'Microsoft.DesktopAppInstaller', 'Microsoft.WindowsStore', 'Microsoft.ScreenSketch', 'Microsoft.GetHelp'
         $hits = foreach ($pattern in $script:appx) { foreach ($name in $protected) { if ($name -like $pattern) { "$pattern зачіпає $name" } } }
         Assert-None $hits 'шаблон видалить захищений пакет'
     }
@@ -69,6 +71,14 @@ Describe 'Дані' {
     It 'packages.psd1: git і git.install не стоять разом (git залежить від git.install і ховає його --params)' {
         $ids = @($script:packages | ForEach-Object { $_.Id })
         Assert-True (-not ($ids -contains 'git' -and $ids -contains 'git.install')) 'git і git.install разом'
+    }
+
+    It 'manual-steps.psd1: кожен крок має Group, Title і How; Task - ім''я наявної задачі' {
+        $steps = @((Import-PowerShellDataFile -Path "$script:ProjectRoot\data\manual-steps.psd1").Steps)
+        $taskNames = @(Get-ChildItem -LiteralPath "$script:ProjectRoot\tasks" -Filter '*.ps1' -File | ForEach-Object { $_.BaseName -replace '^\d{2}-', '' })
+        Assert-True ($steps.Count -gt 0) 'у manual-steps.psd1 немає кроків'
+        Assert-None ($steps | Where-Object { -not $_.Group -or -not $_.Title -or @($_.How).Count -eq 0 } | ForEach-Object { "$($_.Title)" }) 'крок без Group/Title/How'
+        Assert-None ($steps | Where-Object { $_.Task -and $_.Task -notin $taskNames } | ForEach-Object { "$($_.Title): $($_.Task)" }) 'Task, якої немає в tasks\ (крок ніколи не показався б)'
     }
 
     It 'cursors.psd1: варіант курсорів має допустимі значення' {
@@ -298,6 +308,63 @@ Describe 'Хелпери модуля' {
     It 'Set-ServiceStartup: відсутня служба - Skip, а не помилка' {
         $errors = Get-ErrorRecords { Set-ServiceStartup -Name 'PostInstall_Test_NoSuchService' -StartupType Manual }
         Assert-True ($errors.Count -eq 0) 'відсутня служба дала помилку'
+    }
+
+    It 'Show-ManualSteps: кроки пропущених задач не показує, файл пише з BOM' {
+        $dir = Join-Path ([IO.Path]::GetTempPath()) "postinstall-test-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $data = Join-Path $dir 'steps.psd1'
+        $out = Join-Path $dir 'out.txt'
+        [IO.File]::WriteAllText($data, "@{ Steps = @(
+            @{ Group = 'Г'; Title = 'Завжди'; How = @('a') }
+            @{ Group = 'Г'; Title = 'ДляSoftware'; Task = 'Software'; How = @('b') }
+            @{ Group = 'Г'; Title = 'ДляShell'; Task = 'Shell'; How = @('c') }
+        ) }", (New-Object System.Text.UTF8Encoding $true))
+        Show-ManualSteps -Path $data -Task 'Software' -OutFile $out 6>$null
+        $text = [IO.File]::ReadAllText($out)
+        $bom = Test-HasUtf8Bom $out
+        Remove-Item -LiteralPath $dir -Recurse -Force
+        Assert-True ($text -match 'Завжди' -and $text -match 'ДляSoftware') 'немає кроку, який мав показатись'
+        Assert-True ($text -notmatch 'ДляShell') 'показано крок задачі, що не виконувалась'
+        Assert-True $bom 'файл без BOM'
+    }
+
+    It 'AppTelemetry: доповнює наявні налаштування, не губить чужі ключі, повторний прогін нічого не змінює' {
+        $dir = Join-Path ([IO.Path]::GetTempPath()) "postinstall-test-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path "$dir\full\home\.claude", "$dir\full\home\.codex", "$dir\full\appdata\Code\User" -Force | Out-Null
+        [IO.File]::WriteAllText("$dir\full\home\.claude\settings.json", '{ "permissions": { "allow": ["Bash(git status)"] }, "env": { "FOO": "bar", "DISABLE_TELEMETRY": "0" } }')
+        [IO.File]::WriteAllText("$dir\full\home\.codex\config.toml", "model = `"m`"`nanalytics.enabled = true`n[otel]`nmetrics_exporter = `"statsig`"`n[otel.exporter.otlp-http]`nendpoint = `"x`"`n")
+        [IO.File]::WriteAllText("$dir\full\appdata\Code\User\settings.json", "// коментар`n{`n    `"editor.fontSize`": 14,`n}")
+        $task = "$script:ProjectRoot\tasks\94-AppTelemetry.ps1"
+        $errors = Get-ErrorRecords {
+            foreach ($case in 'full', 'empty') {
+                & $task -UserHome "$dir\$case\home" -AppData "$dir\$case\appdata" 6>$null
+            }
+        }
+        $snapshot = { Get-ChildItem -LiteralPath $dir -Recurse -File | ForEach-Object { "$($_.FullName)|$([IO.File]::ReadAllText($_.FullName))" } }
+        $first = @(& $snapshot)
+        & $task -UserHome "$dir\full\home" -AppData "$dir\full\appdata" 6>$null
+        & $task -UserHome "$dir\empty\home" -AppData "$dir\empty\appdata" 6>$null
+        $second = @(& $snapshot)
+
+        $claude = Get-Content -LiteralPath "$dir\full\home\.claude\settings.json" -Raw | ConvertFrom-Json
+        $codex = [IO.File]::ReadAllText("$dir\full\home\.codex\config.toml")
+        $codexEmpty = @([IO.File]::ReadAllLines("$dir\empty\home\.codex\config.toml"))
+        $vscode = [IO.File]::ReadAllText("$dir\full\appdata\Code\User\settings.json")
+        $bom = Test-HasUtf8Bom "$dir\empty\home\.claude\settings.json"
+        $backups = @(Get-ChildItem -LiteralPath $dir -Recurse -Filter '*.postinstall.bak').Count
+        Remove-Item -LiteralPath $dir -Recurse -Force
+
+        Assert-True ($errors.Count -eq 0) "несподівані помилки: $($errors.Count)"
+        Assert-True ($claude.env.DISABLE_TELEMETRY -eq '1' -and $claude.env.DISABLE_ERROR_REPORTING -eq '1') 'Claude: телеметрію не вимкнено'
+        Assert-True ($claude.env.FOO -eq 'bar' -and @($claude.permissions.allow).Count -eq 1) 'Claude: загублено чужі налаштування'
+        Assert-True ($codex -match '(?m)^analytics\.enabled = false' -and $codex -notmatch '\[analytics\]') 'Codex: форму з крапкою не виправлено на місці'
+        Assert-True ($codex -match '(?m)^metrics_exporter = "none"' -and $codex -notmatch 'statsig' -and $codex -match 'endpoint = "x"') 'Codex: otel зіпсовано'
+        Assert-True (($codexEmpty -join '|') -eq '[analytics]|enabled = false||[otel]|metrics_exporter = "none"') "Codex з нуля: $($codexEmpty -join '|')"
+        Assert-True ($vscode -match '"telemetry\.telemetryLevel": "off"' -and $vscode -match '// коментар' -and $vscode -match 'editor\.fontSize') 'VS Code: не вимкнено або загублено вміст'
+        Assert-True (-not $bom) 'JSON записано з BOM (Node.js його не прочитає)'
+        Assert-True ($backups -eq 3) "резервних копій: $backups, очікувалось 3 (лише для наявних файлів)"
+        Assert-None (Compare-Object $first $second | ForEach-Object { $_.InputObject.Split('|')[0] }) 'повторний прогін змінив файли'
     }
 
     It 'Cursors без архіву: статус Skipped, без помилок і без змін у системі' {
