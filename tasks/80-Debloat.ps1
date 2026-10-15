@@ -18,21 +18,9 @@ $failed  = New-Object System.Collections.Generic.List[string]
 $removed = 0
 
 foreach ($pattern in $patterns) {
-    foreach ($package in @($installed | Where-Object { $_.Name -like $pattern })) {
-        if (-not $handled.Add($package.PackageFullName)) { continue }      # вже оброблено іншим шаблоном
-        if (-not $PSCmdlet.ShouldProcess($package.PackageFullName, 'Remove-AppxPackage -AllUsers')) { continue }
-        try {
-            Remove-AppxPackage -Package $package.PackageFullName -AllUsers -ErrorAction Stop
-            Write-Step "Видалено: $($package.Name)"
-            $removed++
-        }
-        catch {
-            $failed.Add($package.Name)
-            Write-Step "Не вдалося видалити $($package.Name): $($_.Exception.Message)" -Level Warn
-        }
-    }
-
-    # Образ системи: без цього застосунок повернеться для нових користувачів
+    # Образ системи ПЕРШИМ: без цього застосунок повернеться для нових користувачів. Якщо спершу зробити
+    # Remove-AppxPackage -AllUsers, запис в образі лишається без файлів, і Remove-AppxProvisionedPackage
+    # падає з "The system cannot find the path specified" (так було для Xbox/Zune/WebExperience).
     foreach ($package in @($provisioned | Where-Object { $_.DisplayName -like $pattern })) {
         if (-not $handled.Add($package.PackageName)) { continue }
         if (-not $PSCmdlet.ShouldProcess($package.PackageName, 'Remove-AppxProvisionedPackage')) { continue }
@@ -44,6 +32,20 @@ foreach ($pattern in $patterns) {
         catch {
             $failed.Add($package.DisplayName)
             Write-Step "Не вдалося видалити з образу $($package.DisplayName): $($_.Exception.Message)" -Level Warn
+        }
+    }
+
+    foreach ($package in @($installed | Where-Object { $_.Name -like $pattern })) {
+        if (-not $handled.Add($package.PackageFullName)) { continue }      # вже оброблено іншим шаблоном
+        if (-not $PSCmdlet.ShouldProcess($package.PackageFullName, 'Remove-AppxPackage -AllUsers')) { continue }
+        try {
+            Remove-AppxPackage -Package $package.PackageFullName -AllUsers -ErrorAction Stop
+            Write-Step "Видалено: $($package.Name)"
+            $removed++
+        }
+        catch {
+            $failed.Add($package.Name)
+            Write-Step "Не вдалося видалити $($package.Name): $($_.Exception.Message)" -Level Warn
         }
     }
 }

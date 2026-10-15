@@ -4,18 +4,18 @@
 # Застаріле для Windows 11 (IRPStackSize, "3D-об'єкти", Edge Legacy і Cortana в конфігу O&O, News and Interests) прибрано.
 
 #додаємо F8 для завантаження у безпечний режим. Дає змогу якщо Windows перестане завантажуватись перейти у безпечний режим натисканням F8 під час запуску Windows як у старіших версіях.
-Write-Host -ForegroundColor DarkMagenta "Turn on legacy boot menu"
+Write-Step "Turn on legacy boot menu"
 Invoke-Native -FilePath bcdedit -Arguments "/set", "{current}", "bootmenupolicy", "legacy"
 
 #Виставляємо ліміт для точок відновлення у 5% від об'єму диска
-Write-Host -ForegroundColor DarkMagenta "Restore points limit 5%"
+Write-Step "Restore points limit 5%"
 Invoke-Native -FilePath vssadmin -Arguments "resize", "shadowstorage", "/for=C:", "/on=C:", "/maxsize=5%"
 
 # Увімкнення відновлення системи та точка відновлення перенесені в tasks\00-Checkpoint.ps1
 # (вони виконуються ПЕРЕД цим скриптом).
 
 #Налаштовуємо план споживання. Гібернацію та режим сну вимикаю (0 - це вимкнути), для монітора даємо час 30 хвилин від мережі, та 20 хвилин від батареї до вимкнення 
-Write-Host -ForegroundColor DarkMagenta "Configure power plan"
+Write-Step "Configure power plan"
 Invoke-Native -FilePath powercfg.exe -Arguments "-change", "-monitor-timeout-ac", "30"
 Invoke-Native -FilePath powercfg.exe -Arguments "-change", "-monitor-timeout-dc", "20"
 Invoke-Native -FilePath powercfg.exe -Arguments "-change", "-disk-timeout-ac", "0"
@@ -28,14 +28,14 @@ Invoke-Native -FilePath powercfg.exe -Arguments "-change", "-hibernate-timeout-d
 #Вимкнення NBT-NS
 #NBT-NS є старою, але все ще корисною технологією для розв'язання імен у локальних мережах, особливо для забезпечення сумісності з застарілими системами. 
 #Якщо у вашій мережі немає застарілих систем, то задля безпеки NBT-NS краще вимкнути. 
-Write-Host -ForegroundColor DarkMagenta "Turning off NBT-NS"
+Write-Step "Turning off NBT-NS"
 $regkey = "HKLM:SYSTEM\CurrentControlSet\services\NetBT\Parameters\Interfaces"
 Get-ChildItem $regkey | ForEach-Object { Set-RegValue -Path "$regkey\$($_.PSChildName)" -Name NetbiosOptions -Value 2 }
 
 #Увімкнення SMB підпису як 'always'. Збільшує витрати на обробку даних всередині мережі, та не дає змоги під'єднатись старим пристроям, які не підтримують підпис SMB.
 #З іншого боку включення SMB підпису з параметром "always" забезпечує вищий рівень безпеки шляхом захисту від атак типу MITM і забезпечення цілісності даних.
 #Якщо не користуєтесь локальними мережами, або для вас безпека в мережі важливіша за невелику втрату швидкості, то цей пункт краще увімкнути.
-Write-Host -ForegroundColor DarkMagenta "Turning on SMB sign as 'always'"
+Write-Step "Turning on SMB sign as 'always'"
 $Parameters = @{
     RequireSecuritySignature = $True
     EnableSecuritySignature = $True
@@ -46,15 +46,15 @@ Set-SmbServerConfiguration @Parameters
 
 #Встановимо затримку блокування акаунта на 30 хвилин після 5 неправильно введених паролів.
 #Це унеможливить безпосередній злам ПК за допомогою BruteForce
-Write-Host -ForegroundColor DarkMagenta "Setup account security settings:"
-Write-Host -ForegroundColor DarkMagenta "Block account for 30 minutes `n after 5 incorrect login attempts:"
+Write-Step "Setup account security settings:"
+Write-Step "Block account for 30 minutes `n after 5 incorrect login attempts:"
 Invoke-Native -FilePath net -Arguments "accounts", "/lockoutthreshold:5"
 #Встановлюємо період блокування в хв.
 Invoke-Native -FilePath net -Arguments "accounts", "/lockoutduration:30"
 #Встановлюємо час через який можна буде вводити пароль знову в хв.
 Invoke-Native -FilePath net -Arguments "accounts", "/lockoutwindow:30"
 
-Write-Host  -ForegroundColor DarkMagenta "Run O&O Shutup"
+Write-Step "Run O&O Shutup"
 #Попереду одне із моїх дивних рішень. Щоб не завантажувати файл конфігурації телеметрії для застосунка O&O Shutup, я просто його зчитаю прямо з цього файла та запишу у окремий файл. Таким чином ми викличемо вимкнення телеметрії завантаживши лише O&O Shutup. І файл і O&O Shutup видаляться після того, як робота буде виконана.
 $configText = @"
 P001	+	# Disable sharing of handwriting data (Category: Privacy)
@@ -299,22 +299,43 @@ $configText | Out-File -FilePath $configFilePath -Encoding UTF8
         Remove-Item -Path $ooTool, $configFilePath -Force -ErrorAction SilentlyContinue
     }
 
-    Write-Host  -ForegroundColor DarkMagenta "Turn off telemetry in planner"
+    Write-Step "Turn off telemetry in planner"
     Set-RegValue -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\DataCollection" -Name "AllowTelemetry" -Value 0
     Set-RegValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\DataCollection" -Name "AllowTelemetry" -Value 0
-    Disable-ScheduledTask -TaskName "Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser" | Out-Null
-
-    Disable-ScheduledTask -TaskName "Microsoft\Windows\Autochk\Proxy" | Out-Null
-    Disable-ScheduledTask -TaskName "Microsoft\Windows\Customer Experience Improvement Program\Consolidator" | Out-Null
-    Disable-ScheduledTask -TaskName "Microsoft\Windows\Customer Experience Improvement Program\UsbCeip" | Out-Null
-    Disable-ScheduledTask -TaskName "Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector" | Out-Null
+    # Disable-ScheduledTask не приймає повний шлях у -TaskName (потрібні окремо -TaskPath і -TaskName),
+    # а на деяких збірках частини завдань немає - це не привід зривати решту конфігурації
+    foreach ($taskFullName in @(
+            "\Microsoft\Windows\Application Experience\Microsoft Compatibility Appraiser"
+            "\Microsoft\Windows\Autochk\Proxy"
+            "\Microsoft\Windows\Customer Experience Improvement Program\Consolidator"
+            "\Microsoft\Windows\Customer Experience Improvement Program\UsbCeip"
+            "\Microsoft\Windows\DiskDiagnostic\Microsoft-Windows-DiskDiagnosticDataCollector")) {
+        $taskPath = (Split-Path $taskFullName -Parent) + '\'
+        $taskLeaf = Split-Path $taskFullName -Leaf
+        $schedTask = Get-ScheduledTask -TaskPath $taskPath -TaskName $taskLeaf -ErrorAction Ignore
+        if (-not $schedTask) {
+            Write-Step "Завдання планувальника немає на цій збірці: $taskFullName" -Level Skip
+        }
+        elseif ($schedTask.State -eq 'Disabled') {
+            Write-Step "Завдання планувальника вже вимкнене: $taskFullName" -Level Skip
+        }
+        else {
+            try {
+                $schedTask | Disable-ScheduledTask -ErrorAction Stop | Out-Null
+                Write-Step "Вимкнено завдання планувальника: $taskFullName"
+            }
+            catch {
+                Write-Error "Не вдалося вимкнути $taskFullName`: $($_.Exception.Message)"
+            }
+        }
+    }
 
     #Вимикаємо WiFi Sence. Це не дасть нам змогу автоматично шарити інформацію про наш ПК в мережі, щоб інші користувачі бачили нас для обміну файлами, проте сильно покращить безпеку системи.
-    Write-Host  -ForegroundColor DarkMagenta "Turn off Wi-Fi Sense..."
+    Write-Step "Turn off Wi-Fi Sense..."
     Set-RegValue -Path "HKLM:\Software\Microsoft\PolicyManager\default\WiFi\AllowWiFiHotSpotReporting" -Name "Value" -Value 0
     Set-RegValue -Path "HKLM:\Software\Microsoft\PolicyManager\default\WiFi\AllowAutoConnectToWiFiSenseHotspots" -Name "Value" -Value 0
 
-    Write-Host  -ForegroundColor DarkMagenta "Turn off application suggestions..."
+    Write-Step "Turn off application suggestions..."
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "ContentDeliveryAllowed" -Value 0
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "OemPreInstalledAppsEnabled" -Value 0
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "PreInstalledAppsEnabled" -Value 0
@@ -326,7 +347,7 @@ $configText | Out-File -FilePath $configFilePath -Encoding UTF8
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-353698Enabled" -Value 0
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SystemPaneSuggestionsEnabled" -Value 0
     Set-RegValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\CloudContent" -Name "DisableWindowsConsumerFeatures" -Value 1
-    Write-Host  -ForegroundColor DarkMagenta "Disabling Activity History..."
+    Write-Step "Disabling Activity History..."
     Set-RegValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "EnableActivityFeed" -Value 0
     Set-RegValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "PublishUserActivities" -Value 0
     Set-RegValue -Path "HKLM:\SOFTWARE\Policies\Microsoft\Windows\System" -Name "UploadUserActivities" -Value 0
@@ -334,19 +355,19 @@ $configText | Out-File -FilePath $configFilePath -Encoding UTF8
     # DiagTrack: тип запуску і зупинка - у data\services.psd1 (Етап 4, п. 4.2); тут їх більше немає.
 
     #Remote Assistance у Windows є потужним інструментом для отримання або надання допомоги на відстані. Це особливо корисно в корпоративному середовищі, де технічна підтримка може швидко і ефективно вирішувати проблеми користувачів. Для домашнього користування, користувачі надають перевагу стороннім застосункам, таким, як AnyDesk.Тож можна видалити.
-    Write-Host  -ForegroundColor DarkMagenta "Turn off Remote Assistance..."
+    Write-Step "Turn off Remote Assistance..."
     Set-RegValue -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Remote Assistance" -Name "fAllowToGetHelp" -Value 0
 
     # Показ операцій з файлами
-    Write-Host -ForegroundColor DarkMagenta "Show detailed operations with files..."
+    Write-Step "Show detailed operations with files..."
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\OperationStatusManager" -Name "EnthusiastMode" -Value 1
 
     # Приховування кнопки Task View
-    Write-Host -ForegroundColor DarkMagenta "Hide button TaskView..."
+    Write-Step "Hide button TaskView..."
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "ShowTaskViewButton" -Value 0
 
     #Приховуємо значок Люди з панелі завдань
-    Write-Host  -ForegroundColor DarkMagenta "Hide icon People if shown..."
+    Write-Step "Hide icon People if shown..."
     Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced\People" -Name "PeopleBand" -Value 0
 
     # Видаляємо кнопку "Створити зустріч" з панелі завдань якщо вона є
@@ -354,7 +375,7 @@ $configText | Out-File -FilePath $configFilePath -Encoding UTF8
     Set-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer" -Name "HideSCAMeetNow" -Value 1
 
     #Autologger - файл у який пишеться дуже багато телеметрії Microsoft і потім відправляється на опрацювання. Якщо ви також не хочете, щоб про вас збирали та відправляли якісь дані, то вимикаємо це все діло, та забороняємо системі створювати нові файли в тій теці на відправку.
-        Write-Host  -ForegroundColor DarkMagenta "remove file AutoLogger and deny access to its directory..."
+        Write-Step "remove file AutoLogger and deny access to its directory..."
         $autoLoggerDir = "$env:PROGRAMDATA\Microsoft\Diagnosis\ETLLogs\AutoLogger"
         If (Test-Path "$autoLoggerDir\AutoLogger-Diagtrack-Listener.etl") {
             Remove-Item "$autoLoggerDir\AutoLogger-Diagtrack-Listener.etl"
@@ -362,16 +383,16 @@ $configText | Out-File -FilePath $configFilePath -Encoding UTF8
         Invoke-Native -FilePath icacls -Arguments $autoLoggerDir, "/deny", "SYSTEM:(OI)(CI)F"
 
         #дуже важливо для безпеки системи, щоб користувач бачив, що ніхто не замаскував небезпечний скрипт під інший файл. Якщо ви бачите розширення файлів, такий фокус з вами не пройде
-        Write-Host -ForegroundColor DarkMagenta "Show known file extentions..."
+        Write-Step "Show known file extentions..."
         Set-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "HideFileExt" -Value 0
 
     # Тип запуску служб винесено в data\services.psd1 і tasks\70-Services.ps1 (Етап 3).
 
-    Write-Host  -ForegroundColor DarkMagenta "Turn off Bing Search in Start menu..."
+    Write-Step "Turn off Bing Search in Start menu..."
         Set-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" -Name "BingSearchEnabled" -Value 0
-        Write-Host  -ForegroundColor DarkMagenta "Turn off Cortana"
+        Write-Step "Turn off Cortana"
         Set-RegValue -Path "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Search" -Name "CortanaConsent" -Value 0
-        Write-Host  -ForegroundColor DarkMagenta "Hide search button and panel..."
+        Write-Step "Hide search button and panel..."
         Set-RegValue -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" -Name "SearchboxTaskbarMode" -Value 0
 
     # Макет меню Пуск прибрано: це механізм Windows 10 (XML був невалідний, у Windows 11 він не діє). Якщо потрібен - робити окремою задачею через механізм Windows 11 (start2.bin).

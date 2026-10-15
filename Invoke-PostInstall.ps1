@@ -112,7 +112,8 @@ try {
         }
         catch {
             Write-Step "ПОМИЛКА у $($task.Name): $($_.Exception.Message)" -Level Error
-            Write-Step "$($_.ScriptStackTrace)" -Level Skip
+            # ScriptStackTrace буває порожнім (помилка з cmdlet'а), а Write-Step забороняє порожній Message
+            if ($_.ScriptStackTrace) { Write-Step $_.ScriptStackTrace -Level Skip }
             $results.Add([pscustomobject]@{
                 Task = $task.Name; Status = 'FAILED'; Seconds = [math]::Round($timer.Elapsed.TotalSeconds, 1); Note = $_.Exception.Message
             })

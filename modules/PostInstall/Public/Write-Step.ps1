@@ -16,5 +16,6 @@
         Header = '==='; Info = '  >'; Warn = '  !'; Error = ' !!'; Skip = '  -'
     }[$Level]
 
-    Write-Host "$prefix $Message" -ForegroundColor $color
+    # Час потрібен, щоб у журналі було видно, який крок забрав найбільше (напр. тихі операції в Configuration)
+    Write-Host "[$(Get-Date -Format 'HH:mm:ss')] $prefix $Message" -ForegroundColor $color
 }

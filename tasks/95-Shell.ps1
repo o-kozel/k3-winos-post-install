@@ -29,8 +29,11 @@ function Update-ProcessPath {
 Write-Step 'PowerShell 7: встановлення / оновлення'
 # winget, а не choco: офіційний MSI з USE_MU/ENABLE_MU - далі pwsh оновлюється через Windows Update.
 # Якщо pwsh уже стоїть, winget install оновить його до актуальної версії.
+# --installer-type wix обов'язковий: без нього winget обирає MSIX (пріоритет вищий), а той при --scope machine
+# падає з 0x80070005 на ProvisionPackage, і --override з MSI-параметрами для MSIX ігнорується.
 Invoke-Native -FilePath winget -SuccessCodes $winget.SuccessCodes -WhatIf:$WhatIfPreference -ErrorAction Stop -Arguments @(
     'install', '--exact', '--id', 'Microsoft.PowerShell', '--source', 'winget', '--scope', 'machine',
+    '--installer-type', 'wix', '--architecture', 'x64',
     '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity',
     '--override', '/quiet /norestart ADD_PATH=1 USE_MU=1 ENABLE_MU=1 REGISTER_MANIFEST=1 ADD_EXPLORER_CONTEXT_MENU_OPENPOWERSHELL=1 ADD_FILE_CONTEXT_MENU_RUNPOWERSHELL=1')
 

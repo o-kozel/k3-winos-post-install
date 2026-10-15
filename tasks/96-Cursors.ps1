@@ -144,8 +144,15 @@ try {
             Add-Type -Namespace PostInstall -Name NativeCursor -MemberDefinition '[DllImport("user32.dll", SetLastError = true)] public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);'
         }
         # 0x57 = SPI_SETCURSORS; 3 = SPIF_UPDATEINIFILE | SPIF_SENDCHANGE
-        if (-not [PostInstall.NativeCursor]::SystemParametersInfo(0x57, 0, [IntPtr]::Zero, 3)) { throw "SystemParametersInfo завершився помилкою (Win32 $([Runtime.InteropServices.Marshal]::GetLastWin32Error()))" }
-        Write-Step 'Курсори застосовано без перезавантаження'
+        # Реєстр уже записано, тож збій тут не критичний: курсори застосуються при наступному вході в систему
+        if ([PostInstall.NativeCursor]::SystemParametersInfo(0x57, 0, [IntPtr]::Zero, 3)) {
+            Write-Step 'Курсори застосовано без перезавантаження'
+        }
+        else {
+            $win32 = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            Write-Step "SystemParametersInfo не застосував курсори одразу (Win32 $win32); вони з'являться після повторного входу в систему" -Level Warn
+            Set-TaskStatus -Status Warn -Message 'курсори записано в реєстр; застосуються після повторного входу'
+        }
     }
 }
 finally {

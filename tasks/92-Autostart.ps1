@@ -28,7 +28,12 @@ if ($ChocolateyLib) {
     if ($found.Count -gt 0) { $exe = $found[0] }
 }
 if (-not $exe) {
-    $shim = Get-Command 'SuperF4.exe' -CommandType Application -ErrorAction Ignore
+    # Пакет superf4 1.4.0 розгортає файл у "$env:APPDATA\SuperF4\" (видно в журналі choco), а не в теку lib
+    $appDataExe = Join-Path $env:APPDATA 'SuperF4\SuperF4.exe'
+    if (Test-Path -LiteralPath $appDataExe) { $exe = $appDataExe }
+}
+if (-not $exe) {
+    $shim =Get-Command 'SuperF4.exe' -CommandType Application -ErrorAction Ignore
     if ($shim) { $exe = @($shim)[0].Source }
 }
 
@@ -46,6 +51,7 @@ if ($PSCmdlet.ShouldProcess($taskName, "Зареєструвати автоза�
     $settings  = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -DisallowHardTerminate
     $task      = New-ScheduledTask -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Description 'Automatically run SuperF4'
 
-    Register-ScheduledTask -TaskName $taskName -InputObject $task -User $env:UserName -RunLevel Highest -ErrorAction Stop | Out-Null
+    # -RunLevel тут не можна: він з іншого набору параметрів, ніж -InputObject (рівень Highest уже в $principal)
+    Register-ScheduledTask -TaskName $taskName -InputObject $task -User $env:UserName -ErrorAction Stop | Out-Null
     Write-Step "Завдання '$taskName' створено"
 }
